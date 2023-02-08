@@ -1,7 +1,7 @@
 from django.shortcuts import render
-from rest_framework.views import APIView
+from rest_framework.views import APIView, status
 from rest_framework.response import Response
-from .serializer import PetSerializer
+from .serializer import PetSerializer, UpdatePetSerializer
 from groups.models import Group
 from traits.models import Trait
 from django.forms.models import model_to_dict
@@ -40,7 +40,7 @@ class PetView(APIView, PageNumberPagination):
 
         try:
             Pet.objects.get(name__contains=pet_data.validated_data["name"])
-            return Response("Pet Already Exists", 400)
+            return Response("Pet Already Exists", status.HTTP_400_BAD_REQUEST)
 
         except Pet.DoesNotExist:
             pet = Pet.objects.create(
@@ -59,10 +59,95 @@ class PetView(APIView, PageNumberPagination):
             pet_id = model_to_dict(pet)
             teste = Pet.objects.get(id=pet_id["id"])
             serializer = PetSerializer(teste)
-        return Response(serializer.data, 201)
+        return Response(serializer.data, status.HTTP_201_CREATED)
 
     def get(self, request):
+        pet_trait = request.query_params["trait"]
+        if pet_trait:
+            pets_traits = Pet.objects.filter(traits__name__icontains=pet_trait)
+            result_page = self.paginate_queryset(pets_traits, request, view=self)
+            serializer = PetSerializer(result_page, many=True)
+            return self.get_paginated_response(serializer.data)
         pets = Pet.objects.all()
         result_page = self.paginate_queryset(pets, request, view=self)
         serializer = PetSerializer(result_page, many=True)
         return self.get_paginated_response(serializer.data)
+
+
+class PetSpecificView(APIView):
+    def get(self, request, pet_id):
+        try:
+            pet = Pet.objects.get(pk=pet_id)
+        except Pet.DoesNotExist:
+            return Response({"detail": "Not found."}, status.HTTP_404_NOT_FOUND)
+        pet_return = PetSerializer(pet)
+        return Response(pet_return.data, status.HTTP_200_OK)
+
+    def patch(self, request, pet_id):
+        try:
+            pet = Pet.objects.get(pk=pet_id)
+        except Pet.DoesNotExist:
+            return Response({"detail": "Not found."}, status.HTTP_404_NOT_FOUND)
+
+        sex_pet = request.data.get("sex", None)
+        if sex_pet and sex_pet not in [
+            "Male",
+            "Female",
+            "Not Informed",
+        ]:
+            return Response(
+                {"sex": [f'"{request.data["sex"]}" is not a valid choice.']},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        group_pet = request.data.get("group", None)
+        if group_pet is not None:
+            try:
+                group = Group.objects.get(
+                    scientific_name__contains=group_pet["scientific_name"]
+                )
+            except Group.DoesNotExist:
+                group = Group.objects.create(**group_pet)
+
+            pet.group = group
+
+        traits_pet = request.data.get("traits", None)
+        if traits_pet is not None:
+            traits = []
+            for trait in traits_pet:
+                try:
+                    t = Trait.objects.get(name__icontains=trait["trait_name"])
+                except Trait.DoesNotExist:
+                    validate_t = TraitSerializer(data=trait)
+                    validate_t.is_valid()
+                    t = Trait.objects.create(**validate_t.validated_data)
+                traits.append(t)
+            pet.traits.set(traits)
+
+        Pet.objects.filter(pk=pet_id).update(
+            name=request.data.get("name", pet.name),
+            age=request.data.get("age", pet.age),
+            weight=request.data.get("weight", pet.weight),
+            sex=request.data.get("sex", pet.sex),
+        )
+        pet.name = request.data.get("name", pet.name)
+        pet.age = request.data.get("age", pet.age)
+        pet.weight = request.data.get("weight", pet.weight)
+        pet.sex = request.data.get("sex", pet.sex)
+        pet.save()
+
+        teste = Pet.objects.get(pk=pet_id)
+        teste_serializer = PetSerializer(teste)
+
+        print(teste_serializer.data)
+        pet_return = PetSerializer(pet)
+        pet_return.data
+        return Response(pet_return.data, status.HTTP_200_OK)
+
+    def delete(self, request, pet_id):
+        try:
+            pet = Pet.objects.get(pk=pet_id).delete()
+        except Pet.DoesNotExist:
+            return Response({"detail": "Not found."}, status.HTTP_404_NOT_FOUND)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)

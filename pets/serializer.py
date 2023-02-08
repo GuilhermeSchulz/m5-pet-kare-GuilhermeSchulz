@@ -12,3 +12,12 @@ class PetSerializer(serializers.Serializer):
     sex = serializers.CharField(default=Sex.DEFAULT)
     group = GroupSerializer()
     traits = TraitSerializer(many=True)
+
+
+class UpdatePetSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=50, required=False)
+    age = serializers.IntegerField(required=False)
+    weight = serializers.FloatField(required=False)
+    sex = serializers.CharField(default=Sex.DEFAULT, required=False)
+    group = GroupSerializer(required=False)
+    traits = TraitSerializer(many=True, required=False)
